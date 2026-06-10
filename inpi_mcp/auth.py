@@ -48,9 +48,10 @@ class BearerAuthMiddleware:
             await self._refuser(send)
             return
 
-        # Token fourni via l'URL : on le réinjecte dans l'endpoint /messages/ annoncé
-        # par le flux SSE, pour que les POST ultérieurs restent authentifiés.
-        if from_query:
+        # Token fourni via l'URL sur la connexion SSE legacy : on le réinjecte dans
+        # l'endpoint /messages/ annoncé, pour que les POST ultérieurs restent
+        # authentifiés. (Inutile pour /mcp : le ?token= y est déjà sur chaque requête.)
+        if from_query and scope.get("path", "").rstrip("/").endswith("/sse"):
             send = self._wrap_send_inject_token(send, token)
 
         await self.app(scope, receive, send)

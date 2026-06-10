@@ -6,4 +6,4 @@ Sources :
 - API PI Marques : https://api-gateway.inpi.fr/services/apidiffusion (portefeuilles de marques)
 """
 
-__version__ = "1.1.0"  # 1.1.0 : injection du token dans l'URL /messages SSE (fix 32600)
+__version__ = "1.2.0"  # 1.2.0 : transport Streamable HTTP /mcp (auth ?token= robuste pour Claude.ai)

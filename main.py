@@ -1,18 +1,23 @@
-"""Point d'entrée du serveur MCP INPI — transport SSE, déployable sur Railway.
+"""Point d'entrée du serveur MCP INPI — déployable sur Railway.
+
+Deux transports MCP sont exposés :
+  - Streamable HTTP : /mcp   (RECOMMANDÉ pour Claude.ai ; le ?token= est présent
+                              sur chaque requête, donc l'auth par URL fonctionne)
+  - SSE (legacy)    : /sse   (+ /messages/)
 
 Lancement local :  python main.py
-Endpoint MCP/SSE :  http://<hote>:<port>/sse
 Santé           :  http://<hote>:<port>/health
 """
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 import uvicorn
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 from inpi_mcp import __version__
 from inpi_mcp.auth import BearerAuthMiddleware
@@ -28,28 +33,37 @@ async def health(_request):
             "status": "ok",
             "service": "mcp-inpi",
             "version": __version__,
-            "transport": "sse",
-            "sse_endpoint": "/sse",
+            "transports": {"streamable_http": "/mcp", "sse": "/sse"},
             "inpi_credentials_configured": settings.has_inpi_credentials,
         }
     )
 
 
 def build_app() -> Starlette:
-    # L'app SSE de FastMCP expose /sse et /messages/ ; on l'enveloppe pour
-    # ajouter / et /health (utilisé par le healthcheck Railway).
+    # On réutilise les routes natives de FastMCP pour chaque transport :
+    #   - streamable_app : Route exacte /mcp  (Streamable HTTP)
+    #   - sse_app        : Route /sse + Mount /messages/  (SSE legacy)
+    # (Remonter /mcp via un Mount casserait le routage interne -> 404.)
+    streamable_app = mcp.streamable_http_app()  # crée aussi mcp.session_manager
     sse_app = mcp.sse_app()
-    middleware = [
-        Middleware(BearerAuthMiddleware, api_key=settings.mcp_api_key),
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        # Le transport Streamable HTTP exige que le session manager tourne
+        # pendant toute la durée de vie de l'application.
+        async with mcp.session_manager.run():
+            log.info("Session manager Streamable HTTP démarré (/mcp).")
+            yield
+
+    middleware = [Middleware(BearerAuthMiddleware, api_key=settings.mcp_api_key)]
+
+    routes = [
+        Route("/", health, methods=["GET"]),
+        Route("/health", health, methods=["GET"]),
+        *streamable_app.routes,  # /mcp
+        *sse_app.routes,         # /sse + /messages/
     ]
-    return Starlette(
-        routes=[
-            Route("/", health, methods=["GET"]),
-            Route("/health", health, methods=["GET"]),
-            Mount("/", app=sse_app),
-        ],
-        middleware=middleware,
-    )
+    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
 
 app = build_app()
@@ -62,14 +76,14 @@ if __name__ == "__main__":
             "échoueront. Renseignez-les dans .env (local) ou les variables Railway."
         )
     if settings.auth_enabled:
-        log.info("Auth Bearer activée : l'endpoint MCP exige MCP_API_KEY.")
+        log.info("Auth Bearer activée : les endpoints MCP exigent MCP_API_KEY.")
     else:
         log.warning(
-            "MCP_API_KEY non définie : l'endpoint MCP est PUBLIC (aucune authentification). "
-            "Définissez MCP_API_KEY pour protéger le serveur."
+            "MCP_API_KEY non définie : les endpoints MCP sont PUBLICS (aucune "
+            "authentification). Définissez MCP_API_KEY pour protéger le serveur."
         )
     log.info(
-        "Démarrage MCP INPI v%s sur http://%s:%s/sse",
+        "Démarrage MCP INPI v%s sur http://%s:%s (transports : /mcp, /sse)",
         __version__,
         settings.host,
         settings.port,

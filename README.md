@@ -1,8 +1,9 @@
 # MCP INPI — Outils juridiques entreprises (RNE · BODACC · Marques)
 
 Serveur **MCP** (Model Context Protocol) en Python exposant des outils juridiques sur les
-entreprises françaises, basés sur trois API **gratuites** de l'INPI / DILA. Transport
-**SSE**, déployable directement sur **Railway** et connectable à **Claude.ai**.
+entreprises françaises, basés sur trois API **gratuites** de l'INPI / DILA. Deux transports :
+**Streamable HTTP** (`/mcp`, recommandé pour Claude.ai) et **SSE** (`/sse`, legacy).
+Déployable directement sur **Railway** et connectable à **Claude.ai**.
 
 ## Outils exposés
 
@@ -58,7 +59,8 @@ copy .env.example .env          # puis éditez .env
 python main.py
 ```
 
-- Endpoint MCP/SSE : `http://localhost:8080/sse`
+- Endpoint Streamable HTTP : `http://localhost:8080/mcp`
+- Endpoint SSE (legacy) : `http://localhost:8080/sse`
 - Santé : `http://localhost:8080/health`
 
 ## Déploiement sur Railway
@@ -73,7 +75,8 @@ Python 3.11). Railway injecte automatiquement la variable `PORT`, déjà prise e
    (et éventuellement `INPI_PI_USERNAME`, `INPI_PI_PASSWORD`). **Ne commitez jamais `.env`.**
 3. Dans **Settings → Networking**, cliquez *Generate Domain* pour obtenir une URL publique.
 4. Le déploiement se lance automatiquement ; le healthcheck pointe sur `/health`.
-5. Votre endpoint public sera : `https://<votre-projet>.up.railway.app/sse`
+5. Vos endpoints publics : `https://<votre-projet>.up.railway.app/mcp` (recommandé)
+   ou `.../sse` (legacy).
 
 **Ou via la CLI Railway :**
 
@@ -90,10 +93,10 @@ railway domain        # génère l'URL publique
 
 Le serveur peut être protégé par une **clé Bearer** via la variable `MCP_API_KEY` :
 
-- Si `MCP_API_KEY` est définie, toute requête sur `/sse` et `/messages/` doit présenter
-  le token, **au choix** :
+- Si `MCP_API_KEY` est définie, toute requête sur `/mcp`, `/sse` et `/messages/` doit
+  présenter le token, **au choix** :
   - via l'en-tête `Authorization: Bearer <MCP_API_KEY>`, ou
-  - via le paramètre d'URL `?token=<MCP_API_KEY>` (ex. `.../sse?token=...`, pratique pour
+  - via le paramètre d'URL `?token=<MCP_API_KEY>` (ex. `.../mcp?token=...`, pratique pour
     les clients ne gérant pas les en-têtes, comme OpenLégi).
   Sinon → **401**.
 - `/health` reste accessible sans clé (healthcheck Railway).
@@ -108,22 +111,23 @@ python -c "import secrets; print('mcpinpi_' + secrets.token_urlsafe(32))"
 
 ## Connexion à Claude.ai
 
-Dans Claude.ai → *Settings → Connectors → Add custom connector*, renseignez l'URL SSE :
+Dans Claude.ai → *Settings → Connectors → Add custom connector*, renseignez l'URL
+**Streamable HTTP** (recommandée) avec le token dans l'URL :
 
 ```
-https://<votre-projet>.up.railway.app/sse
+https://<votre-projet>.up.railway.app/mcp?token=<votre MCP_API_KEY>
 ```
 
-Si `MCP_API_KEY` est activée, authentifiez le connecteur, soit par en-tête :
+> ⚠️ **Important** : utilisez bien `/mcp` (Streamable HTTP), **pas** `/sse`, lorsque vous
+> passez le token via `?token=`. En SSE, Claude.ai ne conserve pas la query string de
+> l'URL `/messages/` annoncée par le serveur, ce qui provoque l'erreur
+> « Session terminated » (code 32600). Avec Streamable HTTP, toutes les requêtes vont sur
+> la même URL `/mcp`, donc le token est toujours transmis.
+
+Alternative par en-tête (fonctionne aussi bien sur `/mcp` que `/sse`) :
 
 ```
 Authorization: Bearer <votre MCP_API_KEY>
-```
-
-soit en passant le token directement dans l'URL :
-
-```
-https://<votre-projet>.up.railway.app/sse?token=<votre MCP_API_KEY>
 ```
 
 ## Notes & limites
@@ -141,7 +145,7 @@ https://<votre-projet>.up.railway.app/sse?token=<votre MCP_API_KEY>
 
 ```
 mcp-inpi/
-├── main.py                 # entrée : app Starlette (SSE + /health), uvicorn
+├── main.py                 # entrée : app Starlette (/mcp + /sse + /health), uvicorn
 ├── railway.json            # config de déploiement Railway (Nixpacks)
 ├── Procfile                # commande de démarrage
 ├── .python-version         # version Python (3.11)
