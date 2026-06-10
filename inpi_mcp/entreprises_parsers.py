@@ -5,6 +5,8 @@ nature_juridique, siege, dirigeants, etat_administratif…). Parsing défensif v
 """
 from __future__ import annotations
 
+import re
+
 from .reference import libelle_forme_juridique
 
 _ETATS = {"A": "active", "C": "cessée"}
@@ -48,6 +50,67 @@ def parse_fiche(result: dict) -> dict:
             "(données SIRENE/RNE ouvertes)."
         ),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Enrichissement RNE (API INPI) — capital, objet social, greffe RCS
+# --------------------------------------------------------------------------- #
+
+# « RCS DIJON », « RCS DIJON (2104) », « R.C.S. PARIS » → capture la ville du greffe.
+_RCS_RE = re.compile(r"R\.?C\.?S\.?\s+([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ'\-]+(?:\s+[A-ZÀ-ÖØ-Þ'\-]+){0,2})")
+
+
+def _greffe_depuis_observations(personne_morale: dict) -> str | None:
+    """Best-effort : extrait la ville du greffe RCS du texte des observations RCS.
+
+    Le RNE n'expose pas de champ greffe structuré ; l'info n'apparaît que dans le
+    texte libre des observations (« ... RCS DIJON (2104) ... »). On prend la dernière
+    observation (la plus récente) qui mentionne un greffe.
+    """
+    observations = (personne_morale.get("observations") or {}).get("rcs") or []
+    for obs in reversed(observations):
+        texte = obs.get("texte") or ""
+        m = _RCS_RE.search(texte)
+        if m:
+            ville = m.group(1).strip().rstrip(" -").title()
+            return f"Greffe de {ville}"
+    return None
+
+
+def parse_rne_complement(formality: dict) -> dict:
+    """Champs d'enrichissement issus de l'API RNE/INPI : capital, objet, greffe RCS.
+
+    Renvoie uniquement les clés effectivement disponibles (toute valeur absente est
+    omise) afin de fusionner proprement dans la fiche data.gouv.fr. Renvoie `{}` si la
+    formalité ne contient pas de personne morale exploitable.
+    """
+    root = formality.get("formality") or formality
+    content = root.get("content") or formality.get("content") or {}
+    pm = content.get("personneMorale") or {}
+    description = ((pm.get("identite") or {}).get("description")) or {}
+
+    complement: dict = {}
+
+    capital = description.get("montantCapital")
+    if capital is not None:
+        complement["capital_social"] = capital
+        complement["devise_capital"] = description.get("deviseCapital") or "EUR"
+        complement["capital_variable"] = description.get("capitalVariable")
+
+    objet = description.get("objet")
+    if objet:
+        complement["objet_social"] = objet
+
+    greffe = _greffe_depuis_observations(pm)
+    if greffe:
+        complement["greffe_rcs"] = greffe
+
+    rncs = (content.get("registreAnterieur") or {}).get("rncs") or {}
+    if rncs.get("estPresent") and rncs.get("dateImmatriculation"):
+        # On ne garde que la date (l'heure/fuseau n'apporte rien ici).
+        complement["date_immatriculation_rcs"] = str(rncs["dateImmatriculation"])[:10]
+
+    return complement
 
 
 def parse_dirigeants(result: dict) -> list[dict]:

@@ -22,6 +22,7 @@ from .clients.recherche_entreprises import (
     RechercheEntreprisesClient,
     RechercheEntreprisesError,
 )
+from .clients.rne import RNEClient, RNEError
 from .config import settings
 from .reference import normaliser_siren
 
@@ -47,6 +48,7 @@ mcp = FastMCP(
 _entreprises: RechercheEntreprisesClient | None = None
 _bodacc: BodaccClient | None = None
 _marques: MarquesClient | None = None
+_rne: RNEClient | None = None
 
 
 def get_entreprises() -> RechercheEntreprisesClient:
@@ -54,6 +56,13 @@ def get_entreprises() -> RechercheEntreprisesClient:
     if _entreprises is None:
         _entreprises = RechercheEntreprisesClient()
     return _entreprises
+
+
+def get_rne() -> RNEClient:
+    global _rne
+    if _rne is None:
+        _rne = RNEClient(settings.inpi_username, settings.inpi_password)
+    return _rne
 
 
 def get_bodacc() -> BodaccClient:
@@ -124,13 +133,37 @@ async def _avec_keepalive(ctx: Context | None, coro: Awaitable[T], label: str) -
 # Outils entreprises (API Recherche d'Entreprises — data.gouv.fr)
 # --------------------------------------------------------------------------- #
 
+# Délai max pour l'enrichissement RNE : il ne doit jamais retarder/bloquer la fiche.
+_RNE_TIMEOUT = 8.0
+
+
+async def _complement_rne(siren: str) -> dict:
+    """Enrichissement optionnel via l'API RNE/INPI (capital, objet, greffe RCS).
+
+    Tolérant à l'échec : tout problème (identifiants absents, timeout, 4xx/5xx, SIREN
+    inconnu au RNE) est avalé et renvoie `{}` — la fiche est alors servie sans ces champs.
+    """
+    if not settings.has_inpi_credentials:
+        return {}
+    try:
+        formality = await asyncio.wait_for(get_rne().get_company(siren), timeout=_RNE_TIMEOUT)
+        return entreprises_parsers.parse_rne_complement(formality)
+    except (asyncio.TimeoutError, RNEError, httpx.HTTPError) as e:
+        log.info("Enrichissement RNE ignoré pour %s : %s", siren, e)
+        return {}
+    except Exception as e:  # noqa: BLE001
+        log.warning("Enrichissement RNE inattendu ignoré pour %s : %s", siren, e)
+        return {}
+
+
 @mcp.tool()
 async def fiche_societe(siren: str, ctx: Context) -> dict:
-    """Identité d'une société française (source : API Recherche d'Entreprises, data.gouv.fr).
+    """Identité d'une société française (data.gouv.fr, enrichie si possible par le RNE/INPI).
 
     Renvoie dénomination, sigle, forme juridique, activité principale (NAF), date de
-    création, adresse du siège et SIREN. (Capital et objet social non fournis par cette
-    source ouverte.)
+    création, adresse du siège et SIREN (source : API Recherche d'Entreprises). Quand
+    l'API RNE/INPI répond à temps, la fiche est enrichie du capital social, de l'objet
+    social et du greffe RCS ; sinon elle est renvoyée sans ces champs.
 
     Args:
         siren: Numéro SIREN (9 chiffres ; espaces/tirets et SIRET 14 chiffres tolérés).
@@ -139,16 +172,27 @@ async def fiche_societe(siren: str, ctx: Context) -> dict:
         siren = _valider_siren(siren)
     except ValueError as e:
         return _err(str(e))
+    # Enrichissement RNE lancé en parallèle de la requête data.gouv.fr (borné à 8s).
+    rne_task = asyncio.ensure_future(_complement_rne(siren))
     try:
         result = await _avec_keepalive(
             ctx, get_entreprises().par_siren(siren), f"Recherche entreprise {siren}"
         )
-        return entreprises_parsers.parse_fiche(result)
     except (EntrepriseNotFound, RechercheEntreprisesError) as e:
+        rne_task.cancel()
         return _err(str(e), siren=siren)
     except Exception as e:  # noqa: BLE001
+        rne_task.cancel()
         log.exception("fiche_societe")
         return _err(f"Erreur inattendue : {e}", siren=siren)
+
+    fiche = entreprises_parsers.parse_fiche(result)
+    complement = await rne_task  # ne lève jamais (échecs avalés -> {})
+    if complement:
+        fiche.update(complement)
+        fiche["source"] = "Recherche d'Entreprises (data.gouv.fr) + RNE (INPI)"
+        fiche.pop("note", None)
+    return fiche
 
 
 @mcp.tool()
