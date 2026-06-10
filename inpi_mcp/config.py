@@ -31,12 +31,24 @@ class Settings:
         return bool(self.inpi_username and self.inpi_password)
 
 
-def load_settings() -> Settings:
-    username = os.environ.get("INPI_USERNAME", "").strip()
-    password = os.environ.get("INPI_PASSWORD", "").strip()
+def _clean_secret(name: str) -> str:
+    """Lit une variable d'environnement en retirant espaces et guillemets parasites.
 
-    pi_username = os.environ.get("INPI_PI_USERNAME", "").strip() or username
-    pi_password = os.environ.get("INPI_PI_PASSWORD", "").strip() or password
+    Erreur fréquente sur Railway/Replit : coller la valeur entourée de guillemets
+    (INPI_PASSWORD="xxx"), qui sont alors stockés littéralement et provoquent un 401.
+    """
+    value = os.environ.get(name, "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1].strip()
+    return value
+
+
+def load_settings() -> Settings:
+    username = _clean_secret("INPI_USERNAME")
+    password = _clean_secret("INPI_PASSWORD")
+
+    pi_username = _clean_secret("INPI_PI_USERNAME") or username
+    pi_password = _clean_secret("INPI_PI_PASSWORD") or password
 
     host = os.environ.get("HOST", "0.0.0.0").strip() or "0.0.0.0"
     port = int(os.environ.get("PORT", "8080"))

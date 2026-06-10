@@ -26,6 +26,17 @@ class RNENotFound(RNEError):
     """SIREN inconnu (HTTP 404)."""
 
 
+def _message_inpi(resp: httpx.Response) -> str:
+    """Extrait le message d'erreur lisible renvoyé par l'INPI."""
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            return data.get("message") or data.get("title") or str(data)
+    except ValueError:
+        pass
+    return (resp.text or "").strip()[:200] or "réponse vide"
+
+
 class RNEClient:
     def __init__(self, username: str, password: str, timeout: float = 30.0) -> None:
         self._username = username
@@ -51,7 +62,12 @@ class RNEClient:
             json={"username": self._username, "password": self._password},
         )
         if resp.status_code in (401, 403):
-            raise RNEError("Authentification INPI refusée (identifiant/mot de passe).")
+            raise RNEError(
+                f"Authentification INPI refusée (HTTP {resp.status_code}) : "
+                f"{_message_inpi(resp)}. Vérifiez INPI_USERNAME (= email exact du compte "
+                "data.inpi.fr) et INPI_PASSWORD, et que l'accès « API RNE » est bien activé "
+                "sur le compte."
+            )
         resp.raise_for_status()
         token = resp.json().get("token")
         if not token:
