@@ -11,6 +11,7 @@ import asyncio
 import logging
 from typing import Awaitable, TypeVar
 
+import httpx
 from mcp.server.fastmcp import Context, FastMCP
 
 from . import parsers
@@ -104,6 +105,11 @@ async def _avec_keepalive(ctx: Context | None, coro: Awaitable[T], label: str) -
                     await ctx.info(f"{label} toujours en cours ({secondes}s)…")
                 except Exception:  # noqa: BLE001
                     pass
+    except httpx.TimeoutException as e:
+        # str(ReadTimeout) est souvent vide : on renvoie un message explicite.
+        raise TimeoutError(
+            f"Délai dépassé ({label}) : l'API INPI/BODACC est trop lente. Réessayez."
+        ) from e
     finally:
         if not task.done():
             task.cancel()

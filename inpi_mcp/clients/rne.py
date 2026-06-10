@@ -38,15 +38,16 @@ def _message_inpi(resp: httpx.Response) -> str:
 
 
 class RNEClient:
-    def __init__(self, username: str, password: str, timeout: float = 15.0) -> None:
+    def __init__(self, username: str, password: str, timeout: float = 30.0) -> None:
         self._username = username
         self._password = password
         self._token: str | None = None
         self._lock = asyncio.Lock()
         self._client = httpx.AsyncClient(
             base_url=BASE_URL,
-            # connect court (5s) pour échouer vite si l'INPI est injoignable,
-            # read plus long pour les gros enregistrements ; cf. keepalive côté serveur.
+            # connect court (5s) pour échouer vite si l'INPI est injoignable ;
+            # read généreux (30s) car certains gros enregistrements RNE sont lents
+            # (le keepalive côté serveur maintient la session client pendant ce temps).
             timeout=httpx.Timeout(timeout, connect=5.0),
             headers={"Accept": "application/json"},
         )

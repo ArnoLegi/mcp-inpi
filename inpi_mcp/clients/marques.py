@@ -54,7 +54,7 @@ class MarquesNotFound(MarquesError):
 
 
 class MarquesClient:
-    def __init__(self, username: str, password: str, timeout: float = 15.0) -> None:
+    def __init__(self, username: str, password: str, timeout: float = 30.0) -> None:
         self._username = username
         self._password = password
         self._authenticated = False

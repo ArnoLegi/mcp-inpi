@@ -27,7 +27,7 @@ class BodaccError(RuntimeError):
 
 
 class BodaccClient:
-    def __init__(self, timeout: float = 15.0) -> None:
+    def __init__(self, timeout: float = 30.0) -> None:
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout, connect=5.0),
             headers={"Accept": "application/json"},

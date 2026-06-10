@@ -6,4 +6,4 @@ Sources :
 - API PI Marques : https://api-gateway.inpi.fr/services/apidiffusion (portefeuilles de marques)
 """
 
-__version__ = "1.4.0"  # 1.4.0 : keepalive streaming + timeouts INPI plus courts
+__version__ = "1.4.1"  # 1.4.1 : read timeout généreux (30s) + message clair sur dépassement
