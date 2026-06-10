@@ -1,4 +1,4 @@
-"""Point d'entrée du serveur MCP INPI — transport SSE, déployable sur Replit.
+"""Point d'entrée du serveur MCP INPI — transport SSE, déployable sur Railway.
 
 Lancement local :  python main.py
 Endpoint MCP/SSE :  http://<hote>:<port>/sse
@@ -35,7 +35,7 @@ async def health(_request):
 
 def build_app() -> Starlette:
     # L'app SSE de FastMCP expose /sse et /messages/ ; on l'enveloppe pour
-    # ajouter / et /health (utiles aux health checks Replit).
+    # ajouter / et /health (utilisé par le healthcheck Railway).
     sse_app = mcp.sse_app()
     return Starlette(
         routes=[
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     if not settings.has_inpi_credentials:
         log.warning(
             "INPI_USERNAME / INPI_PASSWORD non définis : les outils RNE et Marques "
-            "échoueront. Renseignez-les dans .env (local) ou les Secrets Replit."
+            "échoueront. Renseignez-les dans .env (local) ou les variables Railway."
         )
     log.info(
         "Démarrage MCP INPI v%s sur http://%s:%s/sse",
