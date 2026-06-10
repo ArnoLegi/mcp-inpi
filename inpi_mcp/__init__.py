@@ -6,4 +6,4 @@ Sources :
 - API PI Marques : https://api-gateway.inpi.fr/services/apidiffusion (portefeuilles de marques)
 """
 
-__version__ = "1.3.0"  # 1.3.0 : suppression de l'authentification (endpoints publics)
+__version__ = "1.4.0"  # 1.4.0 : keepalive streaming + timeouts INPI plus courts

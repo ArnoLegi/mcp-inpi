@@ -1,9 +1,17 @@
-"""Serveur MCP « INPI Juridique » — définition des 7 outils exposés (transport SSE)."""
+"""Serveur MCP « INPI Juridique » — définition des outils exposés.
+
+Transports : Streamable HTTP (/mcp) et SSE (/sse). Les outils interrogeant l'INPI
+émettent des notifications de progression régulières (keepalive) pendant l'appel
+réseau, afin que le client (Claude.ai) reçoive des octets et ne coupe pas la session
+sur un timeout d'inactivité quand l'API INPI est lente.
+"""
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Awaitable, TypeVar
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from . import parsers
 from .clients.bodacc import BodaccClient, BodaccError
@@ -64,12 +72,49 @@ def _valider_siren(siren: str) -> str:
     return normaliser_siren(siren)
 
 
+T = TypeVar("T")
+
+# Intervalle entre deux notifications de keepalive pendant un appel réseau (secondes).
+_KEEPALIVE_INTERVAL = 3.0
+
+
+async def _avec_keepalive(ctx: Context | None, coro: Awaitable[T], label: str) -> T:
+    """Exécute `coro` en émettant des notifications régulières pour garder le flux actif.
+
+    Tant que l'appel réseau (INPI/BODACC) n'est pas terminé, on envoie périodiquement une
+    notification `info` au client : il reçoit ainsi des octets et ne considère pas la
+    session comme morte (évite « Session terminated » sur appel lent). Les exceptions de
+    `coro` sont propagées telles quelles.
+    """
+    task: asyncio.Task[T] = asyncio.ensure_future(coro)
+    try:
+        if ctx is not None:
+            try:
+                await ctx.info(f"{label}…")
+            except Exception:  # noqa: BLE001 — le keepalive ne doit jamais faire échouer l'outil
+                pass
+        secondes = 0
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=_KEEPALIVE_INTERVAL)
+            if done:
+                return task.result()
+            secondes += int(_KEEPALIVE_INTERVAL)
+            if ctx is not None:
+                try:
+                    await ctx.info(f"{label} toujours en cours ({secondes}s)…")
+                except Exception:  # noqa: BLE001
+                    pass
+    finally:
+        if not task.done():
+            task.cancel()
+
+
 # --------------------------------------------------------------------------- #
 # Outils RNE
 # --------------------------------------------------------------------------- #
 
 @mcp.tool()
-async def fiche_societe(siren: str) -> dict:
+async def fiche_societe(siren: str, ctx: Context) -> dict:
     """Identité complète d'une société française (source : RNE/INPI).
 
     Renvoie dénomination, sigle, forme juridique, objet social, capital social,
@@ -83,7 +128,7 @@ async def fiche_societe(siren: str) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await get_rne().get_company(siren)
+        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
         return parsers.parse_fiche(data)
     except RNENotFound as e:
         return _err(str(e), siren=siren)
@@ -95,7 +140,9 @@ async def fiche_societe(siren: str) -> dict:
 
 
 @mcp.tool()
-async def rechercher_societe(denomination: str, page: int = 1, page_size: int = 20) -> dict:
+async def rechercher_societe(
+    denomination: str, ctx: Context, page: int = 1, page_size: int = 20
+) -> dict:
     """Recherche d'entreprises par dénomination sociale (source : RNE/INPI).
 
     Utile pour retrouver le SIREN d'une société à partir de son nom, avant d'appeler
@@ -111,7 +158,11 @@ async def rechercher_societe(denomination: str, page: int = 1, page_size: int = 
     if len(terme) < 2:
         return _err("Dénomination trop courte (au moins 2 caractères).")
     try:
-        results = await get_rne().search_companies(terme, page_size=page_size, page=page)
+        results = await _avec_keepalive(
+            ctx,
+            get_rne().search_companies(terme, page_size=page_size, page=page),
+            f"Recherche RNE « {terme} »",
+        )
         societes = [parsers.parse_resultat_recherche(r) for r in results]
         return {
             "recherche": terme,
@@ -127,7 +178,7 @@ async def rechercher_societe(denomination: str, page: int = 1, page_size: int = 
 
 
 @mcp.tool()
-async def dirigeants(siren: str) -> dict:
+async def dirigeants(siren: str, ctx: Context) -> dict:
     """Liste des dirigeants / mandataires sociaux d'une société (source : RNE/INPI).
 
     Pour chaque mandataire : qualité (code + libellé), nom/prénoms ou dénomination si
@@ -141,7 +192,7 @@ async def dirigeants(siren: str) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await get_rne().get_company(siren)
+        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
         liste = parsers.parse_dirigeants(data)
         return {"siren": siren, "nombre": len(liste), "dirigeants": liste}
     except (RNENotFound, RNEError) as e:
@@ -152,7 +203,7 @@ async def dirigeants(siren: str) -> dict:
 
 
 @mcp.tool()
-async def beneficiaires_effectifs(siren: str) -> dict:
+async def beneficiaires_effectifs(siren: str, ctx: Context) -> dict:
     """Bénéficiaires effectifs (UBO) déclarés d'une société (source : RNE/INPI).
 
     Renvoie l'identité des UBO et, si disponibles, leurs modalités de contrôle
@@ -167,7 +218,7 @@ async def beneficiaires_effectifs(siren: str) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await get_rne().get_company(siren)
+        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
         liste = parsers.parse_beneficiaires(data)
         return {
             "siren": siren,
@@ -183,7 +234,7 @@ async def beneficiaires_effectifs(siren: str) -> dict:
 
 
 @mcp.tool()
-async def statut_entreprise(siren: str) -> dict:
+async def statut_entreprise(siren: str, ctx: Context) -> dict:
     """Statut d'activité d'une société : actif, radié, en cessation/liquidation (RNE/INPI).
 
     Le statut est déduit des événements de l'historique RNE et des blocs de cessation.
@@ -196,7 +247,7 @@ async def statut_entreprise(siren: str) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await get_rne().get_company(siren)
+        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
         return parsers.parse_statut(data)
     except (RNENotFound, RNEError) as e:
         return _err(str(e), siren=siren)
@@ -210,7 +261,7 @@ async def statut_entreprise(siren: str) -> dict:
 # --------------------------------------------------------------------------- #
 
 @mcp.tool()
-async def procedures_collectives(siren: str) -> dict:
+async def procedures_collectives(siren: str, ctx: Context) -> dict:
     """Procédures collectives d'une société via le BODACC (sauvegarde, RJ, liquidation).
 
     Recherche les annonces BODACC de famille « procédures collectives » pour le SIREN
@@ -225,7 +276,11 @@ async def procedures_collectives(siren: str) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        records = await get_bodacc().annonces_par_siren(siren, famille="collective")
+        records = await _avec_keepalive(
+            ctx,
+            get_bodacc().annonces_par_siren(siren, famille="collective"),
+            f"Interrogation BODACC {siren}",
+        )
         result = parsers.parse_procedures(records)
         result["siren"] = siren
         return result
@@ -241,7 +296,9 @@ async def procedures_collectives(siren: str) -> dict:
 # --------------------------------------------------------------------------- #
 
 @mcp.tool()
-async def portfolio_marques(siren: str, collections: list[str] | None = None) -> dict:
+async def portfolio_marques(
+    siren: str, ctx: Context, collections: list[str] | None = None
+) -> dict:
     """Portefeuille de marques déposées par une société, par SIREN (source : API PI/INPI).
 
     Le SIREN n'est rattaché qu'aux marques françaises (FR) ; les marques EU/WO n'ont pas
@@ -257,7 +314,11 @@ async def portfolio_marques(siren: str, collections: list[str] | None = None) ->
     except ValueError as e:
         return _err(str(e))
     try:
-        hits = await get_marques().search_par_siren(siren, collections=collections)
+        hits = await _avec_keepalive(
+            ctx,
+            get_marques().search_par_siren(siren, collections=collections),
+            f"Recherche marques {siren}",
+        )
         marques = [parsers.parse_marque_hit(h) for h in hits]
         return {
             "siren": siren,
@@ -273,7 +334,7 @@ async def portfolio_marques(siren: str, collections: list[str] | None = None) ->
 
 
 @mcp.tool()
-async def detail_marque(identifiant: str) -> dict:
+async def detail_marque(identifiant: str, ctx: Context) -> dict:
     """Détail d'une marque par son identifiant (collection + numéro, ex. 'FR4216963').
 
     Renvoie la notice complète (dénomination, classes de Nice, dates, statut, titulaire)
@@ -289,7 +350,7 @@ async def detail_marque(identifiant: str) -> dict:
     if ident.isdigit():
         ident = f"FR{ident}"
     try:
-        notice = await get_marques().notice(ident)
+        notice = await _avec_keepalive(ctx, get_marques().notice(ident), f"Notice marque {ident}")
         return {
             "identifiant": ident,
             "logo_url": get_marques().image_url(ident),

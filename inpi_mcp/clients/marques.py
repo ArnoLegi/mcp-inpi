@@ -54,7 +54,7 @@ class MarquesNotFound(MarquesError):
 
 
 class MarquesClient:
-    def __init__(self, username: str, password: str, timeout: float = 30.0) -> None:
+    def __init__(self, username: str, password: str, timeout: float = 15.0) -> None:
         self._username = username
         self._password = password
         self._authenticated = False
@@ -62,7 +62,7 @@ class MarquesClient:
         # Un x-forwarded-for est indiqué « indispensable » par la doc pour les quotas.
         self._client = httpx.AsyncClient(
             base_url=BASE_URL,
-            timeout=timeout,
+            timeout=httpx.Timeout(timeout, connect=5.0),
             headers={"Accept": "application/json", "X-Forwarded-For": "127.0.0.1"},
             follow_redirects=True,
         )
