@@ -38,6 +38,9 @@ INPI_PASSWORD=votre_mot_de_passe
 # Si absent, INPI_USERNAME/INPI_PASSWORD sont réutilisés.
 # INPI_PI_USERNAME=compte_technique@example.com
 # INPI_PI_PASSWORD=mot_de_passe_technique
+
+# Clé Bearer protégeant l'endpoint MCP (voir « Authentification de l'endpoint MCP »).
+MCP_API_KEY=mcpinpi_remplacez_par_votre_cle
 ```
 
 > **Compte INPI** : créez-le sur https://data.inpi.fr/login, puis activez « Accès API RNE »
@@ -78,9 +81,25 @@ Python 3.11). Railway injecte automatiquement la variable `PORT`, déjà prise e
 npm i -g @railway/cli
 railway login
 railway init
-railway variables --set INPI_USERNAME=... --set INPI_PASSWORD=...
+railway variables --set INPI_USERNAME=... --set INPI_PASSWORD=... --set MCP_API_KEY=...
 railway up
 railway domain        # génère l'URL publique
+```
+
+## Authentification de l'endpoint MCP
+
+Le serveur peut être protégé par une **clé Bearer** via la variable `MCP_API_KEY` :
+
+- Si `MCP_API_KEY` est définie, toute requête sur `/sse` et `/messages/` doit présenter
+  l'en-tête `Authorization: Bearer <MCP_API_KEY>`. Sinon → **401**.
+- `/health` reste accessible sans clé (healthcheck Railway).
+- Si `MCP_API_KEY` est absente, l'endpoint est **public** (déconseillé en production ;
+  un avertissement est journalisé au démarrage).
+
+Générez une clé :
+
+```bash
+python -c "import secrets; print('mcpinpi_' + secrets.token_urlsafe(32))"
 ```
 
 ## Connexion à Claude.ai
@@ -89,6 +108,12 @@ Dans Claude.ai → *Settings → Connectors → Add custom connector*, renseigne
 
 ```
 https://<votre-projet>.up.railway.app/sse
+```
+
+Si `MCP_API_KEY` est activée, ajoutez l'en-tête d'authentification du connecteur :
+
+```
+Authorization: Bearer <votre MCP_API_KEY>
 ```
 
 ## Notes & limites

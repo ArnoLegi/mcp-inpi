@@ -10,10 +10,12 @@ import logging
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from inpi_mcp import __version__
+from inpi_mcp.auth import BearerAuthMiddleware
 from inpi_mcp.config import settings
 from inpi_mcp.server import mcp
 
@@ -37,12 +39,16 @@ def build_app() -> Starlette:
     # L'app SSE de FastMCP expose /sse et /messages/ ; on l'enveloppe pour
     # ajouter / et /health (utilisé par le healthcheck Railway).
     sse_app = mcp.sse_app()
+    middleware = [
+        Middleware(BearerAuthMiddleware, api_key=settings.mcp_api_key),
+    ]
     return Starlette(
         routes=[
             Route("/", health, methods=["GET"]),
             Route("/health", health, methods=["GET"]),
             Mount("/", app=sse_app),
-        ]
+        ],
+        middleware=middleware,
     )
 
 
@@ -54,6 +60,13 @@ if __name__ == "__main__":
         log.warning(
             "INPI_USERNAME / INPI_PASSWORD non définis : les outils RNE et Marques "
             "échoueront. Renseignez-les dans .env (local) ou les variables Railway."
+        )
+    if settings.auth_enabled:
+        log.info("Auth Bearer activée : l'endpoint MCP exige MCP_API_KEY.")
+    else:
+        log.warning(
+            "MCP_API_KEY non définie : l'endpoint MCP est PUBLIC (aucune authentification). "
+            "Définissez MCP_API_KEY pour protéger le serveur."
         )
     log.info(
         "Démarrage MCP INPI v%s sur http://%s:%s/sse",
