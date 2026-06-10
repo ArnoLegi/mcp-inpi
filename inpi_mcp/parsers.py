@@ -5,6 +5,8 @@ traités dans `entreprises_parsers.py`.) Parsing défensif via `.get`.
 """
 from __future__ import annotations
 
+import html
+
 # --------------------------------------------------------------------------- #
 # BODACC — procédures collectives
 # --------------------------------------------------------------------------- #
@@ -90,22 +92,77 @@ def _first(d: dict, *keys, default=None):
     return default
 
 
+def _clean(value):
+    """Déséchappe les entités HTML d'une valeur texte (ex. `&apos;`, `&amp;`)."""
+    if isinstance(value, str):
+        return html.unescape(value)
+    return value
+
+
+def _fmt_date(value):
+    """Formate une date INPI `YYYYMMDD` en `YYYY-MM-DD` ; sinon renvoie tel quel."""
+    if isinstance(value, str) and len(value) == 8 and value.isdigit():
+        return f"{value[0:4]}-{value[4:6]}-{value[6:8]}"
+    return value
+
+
+def _flatten_fields(hit: dict) -> dict[str, object]:
+    """Aplatit le tableau `fields` ([{name, value, values}, …]) en dict {name: …}.
+
+    La réponse /search de l'API PI imbrique les champs dans une liste ; chaque entrée
+    porte `value` (scalaire) ou `values` (liste, ex. classes de Nice multiples). Les
+    noms peuvent être dupliqués : on conserve la première occurrence non vide.
+    """
+    out: dict[str, object] = {}
+    for field in hit.get("fields") or []:
+        if not isinstance(field, dict):
+            continue
+        name = field.get("name")
+        if not name or name in out:
+            continue
+        value = field.get("value")
+        values = field.get("values")
+        if value not in (None, ""):
+            out[name] = _clean(value)
+        elif isinstance(values, list) and values:
+            out[name] = [_clean(v) for v in values]
+    return out
+
+
+def _identifiant(hit: dict) -> str | None:
+    """Identifiant marque (collection+numéro, ex. 'FR4256170') depuis href ou documentId."""
+    href = (hit.get("xml") or {}).get("href") if isinstance(hit.get("xml"), dict) else None
+    if isinstance(href, str) and "/" in href:
+        ident = href.rstrip("/").rsplit("/", 1)[-1]
+        if ident:
+            return ident
+    doc = hit.get("documentId")
+    return f"FR{doc}" if doc else None
+
+
 def parse_marque_hit(hit: dict) -> dict:
-    """Synthèse d'une marque depuis un résultat de /search (champs ST.66)."""
-    classes = _first(hit, "ClassNumber", "classNumber", default=[])
+    """Synthèse d'une marque depuis un résultat de /search (champs ST.66).
+
+    Les hits ont la forme {documentId, xml:{href}, image:{href}, fields:[{name,value,values}]}.
+    On tolère aussi un dict déjà aplati (rétro-compat / autres formats).
+    """
+    flat = _flatten_fields(hit) if isinstance(hit.get("fields"), list) else hit
+
+    classes = _first(flat, "ClassNumber", "classNumber", default=[])
     if isinstance(classes, (str, int)):
-        classes = [classes]
+        classes = [str(classes)]
+
     return {
-        "numero_national": _first(hit, "ApplicationNumber", "applicationNumber"),
-        "identifiant": _first(hit, "ukey", "ApplicationNumber"),
-        "denomination": _first(hit, "Mark", "mark"),
-        "statut": _first(hit, "MarkCurrentStatusCode", "markCurrentStatusCode"),
-        "date_depot": _first(hit, "ApplicationDate", "applicationDate"),
-        "date_enregistrement": _first(hit, "RegistrationDate", "registrationDate"),
-        "date_expiration": _first(hit, "ExpiryDate", "expiryDate"),
+        "numero_national": _first(flat, "ApplicationNumber", "applicationNumber"),
+        "identifiant": _identifiant(hit) or _first(flat, "ukey", "ApplicationNumber"),
+        "denomination": _first(flat, "Mark", "mark"),
+        "statut": _first(flat, "MarkCurrentStatusCode", "markCurrentStatusCode"),
+        "date_depot": _fmt_date(_first(flat, "ApplicationDate", "applicationDate")),
+        "date_enregistrement": _fmt_date(_first(flat, "RegistrationDate", "registrationDate")),
+        "date_expiration": _fmt_date(_first(flat, "ExpiryDate", "expiryDate")),
         "classes_nice": classes or None,
-        "type_marque": _first(hit, "MarkFeature", "markFeature"),
-        "deposant": _first(hit, "DEPOSANT", "deposant"),
-        "titulaire": _first(hit, "DEPOTIT", "depotit"),
-        "siren_titulaire": _first(hit, "ApplicantIdentifier", "applicantIdentifier"),
+        "type_marque": _first(flat, "MarkFeature", "markFeature"),
+        "deposant": _first(flat, "DEPOSANT", "deposant"),
+        "titulaire": _first(flat, "DEPOTIT", "depotit"),
+        "siren_titulaire": _first(flat, "ApplicantIdentifier", "applicantIdentifier"),
     }
