@@ -145,26 +145,25 @@ class MarquesClient:
         resp.raise_for_status()
         return _extract_results(resp.json())
 
-    async def notice(self, ident: str) -> dict:
-        """Détail d'une marque par identifiant (collection+numéro, ex. 'FR4216963').
+    async def notice(self, ident: str) -> str:
+        """Notice complète d'une marque par identifiant (collection+numéro, ex. 'FR4216963').
 
-        On force Accept: application/json (la notice est en XML par défaut).
+        Le endpoint /notice ne sert QUE du XML ST.66 : on force donc
+        Accept: application/xml. Demander application/json renvoie un HTTP 406
+        (`application/problem+json`). Le parsing XML est délégué à
+        `parsers.parse_marque_notice`. Renvoie le XML brut (str).
         """
         resp = await self._request(
             "GET",
             NOTICE_PATH.format(ident=ident),
-            headers={"Accept": "application/json"},
+            headers={"Accept": "application/xml"},
         )
         if resp.status_code == 404:
             raise MarquesNotFound(f"Marque {ident} introuvable.")
         if resp.status_code == 429:
             raise MarquesError("Quota API PI dépassé. Réessayez plus tard.")
         resp.raise_for_status()
-        try:
-            return resp.json()
-        except ValueError:
-            # Certaines notices ne renvoient que du XML : on remonte le brut.
-            return {"_raw_xml": resp.text}
+        return resp.text
 
     def image_url(self, ident: str) -> str:
         """URL de l'image/logo standard d'une marque (binaire PNG, accès authentifié)."""

@@ -336,11 +336,11 @@ async def detail_marque(identifiant: str, ctx: Context) -> dict:
     if ident.isdigit():
         ident = f"FR{ident}"
     try:
-        notice = await _avec_keepalive(ctx, get_marques().notice(ident), f"Notice marque {ident}")
+        xml = await _avec_keepalive(ctx, get_marques().notice(ident), f"Notice marque {ident}")
         return {
             "identifiant": ident,
             "logo_url": get_marques().image_url(ident),
-            "notice": notice,
+            "notice": parsers.parse_marque_notice(xml),
         }
     except MarquesNotFound as e:
         return _err(str(e), identifiant=ident)
