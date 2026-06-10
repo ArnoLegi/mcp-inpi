@@ -6,4 +6,4 @@ Sources :
 - API PI Marques : https://api-gateway.inpi.fr/services/apidiffusion (portefeuilles de marques)
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"  # 1.1.0 : injection du token dans l'URL /messages SSE (fix 32600)
