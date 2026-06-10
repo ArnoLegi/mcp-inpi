@@ -1,12 +1,15 @@
-"""Middleware ASGI d'authentification Bearer pour protéger l'endpoint MCP.
+"""Middleware ASGI d'authentification pour protéger l'endpoint MCP.
 
-Si une clé est configurée (MCP_API_KEY), toute requête HTTP doit présenter
-`Authorization: Bearer <clé>`, sauf les chemins exemptés (healthchecks).
-Si aucune clé n'est configurée, le middleware laisse tout passer (endpoint ouvert).
+Si une clé est configurée (MCP_API_KEY), toute requête HTTP doit présenter le token,
+soit via le header `Authorization: Bearer <clé>`, soit via le paramètre d'URL
+`?token=<clé>` (pratique pour les clients ne gérant pas les en-têtes, comme OpenLégi).
+Les chemins exemptés (healthchecks) restent ouverts. Si aucune clé n'est configurée,
+le middleware laisse tout passer (endpoint ouvert).
 """
 from __future__ import annotations
 
 import secrets
+from urllib.parse import parse_qs
 
 from starlette.responses import JSONResponse
 
@@ -37,18 +40,30 @@ class BearerAuthMiddleware:
         await self._refuser(send)
 
     def _token_valide(self, scope) -> bool:
-        headers = dict(scope.get("headers") or [])
-        auth = headers.get(b"authorization", b"").decode("latin-1")
-        prefix = "bearer "
-        if not auth.lower().startswith(prefix):
-            return False
-        token = auth[len(prefix):].strip()
+        token = self._extraire_token(scope)
         # Comparaison à temps constant pour éviter les attaques temporelles.
         return bool(token) and secrets.compare_digest(token, self.api_key)
 
+    def _extraire_token(self, scope) -> str:
+        """Récupère le token depuis le header Bearer, sinon le paramètre d'URL ?token=."""
+        headers = dict(scope.get("headers") or [])
+        auth = headers.get(b"authorization", b"").decode("latin-1")
+        prefix = "bearer "
+        if auth.lower().startswith(prefix):
+            tok = auth[len(prefix):].strip()
+            if tok:
+                return tok
+
+        query = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
+        values = query.get("token") or []
+        return values[0].strip() if values else ""
+
     async def _refuser(self, send) -> None:
         response = JSONResponse(
-            {"erreur": "Non autorisé : header 'Authorization: Bearer <MCP_API_KEY>' requis."},
+            {
+                "erreur": "Non autorisé : fournissez la clé via le header "
+                "'Authorization: Bearer <MCP_API_KEY>' ou le paramètre d'URL '?token=<MCP_API_KEY>'."
+            },
             status_code=401,
             headers={"WWW-Authenticate": "Bearer"},
         )

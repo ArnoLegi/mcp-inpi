@@ -91,7 +91,11 @@ railway domain        # génère l'URL publique
 Le serveur peut être protégé par une **clé Bearer** via la variable `MCP_API_KEY` :
 
 - Si `MCP_API_KEY` est définie, toute requête sur `/sse` et `/messages/` doit présenter
-  l'en-tête `Authorization: Bearer <MCP_API_KEY>`. Sinon → **401**.
+  le token, **au choix** :
+  - via l'en-tête `Authorization: Bearer <MCP_API_KEY>`, ou
+  - via le paramètre d'URL `?token=<MCP_API_KEY>` (ex. `.../sse?token=...`, pratique pour
+    les clients ne gérant pas les en-têtes, comme OpenLégi).
+  Sinon → **401**.
 - `/health` reste accessible sans clé (healthcheck Railway).
 - Si `MCP_API_KEY` est absente, l'endpoint est **public** (déconseillé en production ;
   un avertissement est journalisé au démarrage).
@@ -110,10 +114,16 @@ Dans Claude.ai → *Settings → Connectors → Add custom connector*, renseigne
 https://<votre-projet>.up.railway.app/sse
 ```
 
-Si `MCP_API_KEY` est activée, ajoutez l'en-tête d'authentification du connecteur :
+Si `MCP_API_KEY` est activée, authentifiez le connecteur, soit par en-tête :
 
 ```
 Authorization: Bearer <votre MCP_API_KEY>
+```
+
+soit en passant le token directement dans l'URL :
+
+```
+https://<votre-projet>.up.railway.app/sse?token=<votre MCP_API_KEY>
 ```
 
 ## Notes & limites
