@@ -19,6 +19,9 @@ mcp = FastMCP(
     "inpi-juridique",
     host=settings.host,
     port=settings.port,
+    # Mode sans état : chaque requête HTTP est autonome (pas de session persistée
+    # entre requêtes), ce qui simplifie le déploiement derrière un proxy/scale-out.
+    stateless_http=True,
     instructions=(
         "Outils juridiques sur les entreprises françaises via les API gratuites de l'INPI "
         "(RNE pour l'identité/dirigeants/UBO, BODACC pour les procédures collectives, "
