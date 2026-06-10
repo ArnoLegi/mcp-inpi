@@ -1,9 +1,8 @@
 """Tables de référence et utilitaires de normalisation.
 
-Les codes INPI/INSEE (forme juridique, rôle de dirigeant) sont conservés bruts dans
-les réponses ; ces tables fournissent un libellé lisible *en plus* du code, sans
-jamais l'écraser. Les mappings ne sont volontairement pas exhaustifs : en cas de
-code inconnu, on renvoie le code tel quel.
+Le code de forme juridique (nomenclature INSEE) est conservé brut dans les réponses ;
+cette table fournit un libellé lisible *en plus* du code. Le mapping n'est volontairement
+pas exhaustif : en cas de code inconnu, le libellé vaut None et le code reste exposé.
 """
 from __future__ import annotations
 
@@ -41,34 +40,10 @@ FORMES_JURIDIQUES: dict[str, str] = {
     "9220": "Association déclarée",
 }
 
-# --- Rôles / qualités de mandataires (nomenclature INPI) ---
-# Sous-ensemble courant. Code conservé brut dans tous les cas.
-ROLES_DIRIGEANTS: dict[str, str] = {
-    "5": "Président",
-    "30": "Gérant",
-    "51": "Directeur général",
-    "53": "Directeur général délégué",
-    "60": "Membre du directoire",
-    "61": "Président du directoire",
-    "65": "Membre du conseil de surveillance",
-    "66": "Président du conseil de surveillance",
-    "67": "Administrateur",
-    "70": "Commissaire aux comptes titulaire",
-    "71": "Commissaire aux comptes suppléant",
-    "73": "Associé indéfiniment responsable",
-}
-
-
 def libelle_forme_juridique(code: str | None) -> str | None:
     if not code:
         return None
     return FORMES_JURIDIQUES.get(str(code))
-
-
-def libelle_role(code: str | None) -> str | None:
-    if code is None:
-        return None
-    return ROLES_DIRIGEANTS.get(str(code))
 
 
 _SIREN_RE = re.compile(r"\D")

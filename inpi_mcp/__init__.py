@@ -1,9 +1,10 @@
-"""Serveur MCP exposant des outils juridiques basés sur les API gratuites de l'INPI.
+"""Serveur MCP exposant des outils juridiques sur les entreprises françaises.
 
-Sources :
-- RNE  : https://registre-national-entreprises.inpi.fr/api  (identité, dirigeants, UBO, statut)
-- BODACC : https://bodacc-datadila.opendatasoft.com         (procédures collectives)
-- API PI Marques : https://api-gateway.inpi.fr/services/apidiffusion (portefeuilles de marques)
+Sources (toutes gratuites) :
+- Recherche d'Entreprises : https://recherche-entreprises.api.gouv.fr (identité, dirigeants,
+  statut, recherche — sans clé)
+- BODACC : https://bodacc-datadila.opendatasoft.com (procédures collectives — sans clé)
+- API PI Marques : https://api-gateway.inpi.fr/services/apidiffusion (marques — identifiants INPI)
 """
 
-__version__ = "1.4.1"  # 1.4.1 : read timeout généreux (30s) + message clair sur dépassement
+__version__ = "1.5.0"  # 1.5.0 : identité/dirigeants/statut via l'API Recherche d'Entreprises

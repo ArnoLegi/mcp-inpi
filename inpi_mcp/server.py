@@ -14,10 +14,14 @@ from typing import Awaitable, TypeVar
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 
-from . import parsers
+from . import entreprises_parsers, parsers
 from .clients.bodacc import BodaccClient, BodaccError
 from .clients.marques import MarquesClient, MarquesError, MarquesNotFound
-from .clients.rne import RNEClient, RNEError, RNENotFound
+from .clients.recherche_entreprises import (
+    EntrepriseNotFound,
+    RechercheEntreprisesClient,
+    RechercheEntreprisesError,
+)
 from .config import settings
 from .reference import normaliser_siren
 
@@ -32,23 +36,24 @@ mcp = FastMCP(
     # entre requêtes), ce qui simplifie le déploiement derrière un proxy/scale-out.
     stateless_http=True,
     instructions=(
-        "Outils juridiques sur les entreprises françaises via les API gratuites de l'INPI "
-        "(RNE pour l'identité/dirigeants/UBO, BODACC pour les procédures collectives, "
-        "API PI pour les marques). Les outils prennent un SIREN (9 chiffres) sauf detail_marque."
+        "Outils juridiques sur les entreprises françaises : identité/dirigeants/statut via "
+        "l'API Recherche d'Entreprises (data.gouv.fr), procédures collectives via BODACC, "
+        "marques via l'API PI de l'INPI. Les outils prennent un SIREN (9 chiffres) sauf "
+        "detail_marque."
     ),
 )
 
 # --- Clients partagés (créés à la demande, réutilisés entre appels) ---------- #
-_rne: RNEClient | None = None
+_entreprises: RechercheEntreprisesClient | None = None
 _bodacc: BodaccClient | None = None
 _marques: MarquesClient | None = None
 
 
-def get_rne() -> RNEClient:
-    global _rne
-    if _rne is None:
-        _rne = RNEClient(settings.inpi_username, settings.inpi_password)
-    return _rne
+def get_entreprises() -> RechercheEntreprisesClient:
+    global _entreprises
+    if _entreprises is None:
+        _entreprises = RechercheEntreprisesClient()
+    return _entreprises
 
 
 def get_bodacc() -> BodaccClient:
@@ -116,15 +121,16 @@ async def _avec_keepalive(ctx: Context | None, coro: Awaitable[T], label: str) -
 
 
 # --------------------------------------------------------------------------- #
-# Outils RNE
+# Outils entreprises (API Recherche d'Entreprises — data.gouv.fr)
 # --------------------------------------------------------------------------- #
 
 @mcp.tool()
 async def fiche_societe(siren: str, ctx: Context) -> dict:
-    """Identité complète d'une société française (source : RNE/INPI).
+    """Identité d'une société française (source : API Recherche d'Entreprises, data.gouv.fr).
 
-    Renvoie dénomination, sigle, forme juridique, objet social, capital social,
-    adresse du siège et SIREN.
+    Renvoie dénomination, sigle, forme juridique, activité principale (NAF), date de
+    création, adresse du siège et SIREN. (Capital et objet social non fournis par cette
+    source ouverte.)
 
     Args:
         siren: Numéro SIREN (9 chiffres ; espaces/tirets et SIRET 14 chiffres tolérés).
@@ -134,11 +140,11 @@ async def fiche_societe(siren: str, ctx: Context) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
-        return parsers.parse_fiche(data)
-    except RNENotFound as e:
-        return _err(str(e), siren=siren)
-    except RNEError as e:
+        result = await _avec_keepalive(
+            ctx, get_entreprises().par_siren(siren), f"Recherche entreprise {siren}"
+        )
+        return entreprises_parsers.parse_fiche(result)
+    except (EntrepriseNotFound, RechercheEntreprisesError) as e:
         return _err(str(e), siren=siren)
     except Exception as e:  # noqa: BLE001
         log.exception("fiche_societe")
@@ -149,34 +155,35 @@ async def fiche_societe(siren: str, ctx: Context) -> dict:
 async def rechercher_societe(
     denomination: str, ctx: Context, page: int = 1, page_size: int = 20
 ) -> dict:
-    """Recherche d'entreprises par dénomination sociale (source : RNE/INPI).
+    """Recherche d'entreprises par dénomination sociale (source : API Recherche d'Entreprises).
 
     Utile pour retrouver le SIREN d'une société à partir de son nom, avant d'appeler
     les autres outils. Renvoie une liste condensée (SIREN, dénomination, forme
-    juridique, commune).
+    juridique, commune, statut).
 
     Args:
         denomination: Nom (ou partie du nom) de la société recherchée.
         page: Numéro de page (défaut 1).
-        page_size: Nombre de résultats par page, 1 à 100 (défaut 20).
+        page_size: Nombre de résultats par page, 1 à 25 (défaut 20).
     """
     terme = (denomination or "").strip()
     if len(terme) < 2:
         return _err("Dénomination trop courte (au moins 2 caractères).")
     try:
-        results = await _avec_keepalive(
+        data = await _avec_keepalive(
             ctx,
-            get_rne().search_companies(terme, page_size=page_size, page=page),
-            f"Recherche RNE « {terme} »",
+            get_entreprises().search(terme, page=page, per_page=page_size),
+            f"Recherche « {terme} »",
         )
-        societes = [parsers.parse_resultat_recherche(r) for r in results]
+        res = entreprises_parsers.parse_resultats(data)
         return {
             "recherche": terme,
-            "page": page,
-            "nombre": len(societes),
-            "societes": societes,
+            "page": res["page"],
+            "total": res["total"],
+            "nombre": len(res["societes"]),
+            "societes": res["societes"],
         }
-    except RNEError as e:
+    except RechercheEntreprisesError as e:
         return _err(str(e), recherche=terme)
     except Exception as e:  # noqa: BLE001
         log.exception("rechercher_societe")
@@ -185,10 +192,10 @@ async def rechercher_societe(
 
 @mcp.tool()
 async def dirigeants(siren: str, ctx: Context) -> dict:
-    """Liste des dirigeants / mandataires sociaux d'une société (source : RNE/INPI).
+    """Liste des dirigeants / mandataires sociaux d'une société (source : Recherche d'Entreprises).
 
-    Pour chaque mandataire : qualité (code + libellé), nom/prénoms ou dénomination si
-    personne morale, et indicateur de bénéficiaire effectif.
+    Pour chaque mandataire : qualité, nom/prénoms (ou dénomination + SIREN si personne
+    morale), date de naissance et nationalité quand disponibles.
 
     Args:
         siren: Numéro SIREN (9 chiffres).
@@ -198,10 +205,12 @@ async def dirigeants(siren: str, ctx: Context) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
-        liste = parsers.parse_dirigeants(data)
+        result = await _avec_keepalive(
+            ctx, get_entreprises().par_siren(siren), f"Recherche entreprise {siren}"
+        )
+        liste = entreprises_parsers.parse_dirigeants(result)
         return {"siren": siren, "nombre": len(liste), "dirigeants": liste}
-    except (RNENotFound, RNEError) as e:
+    except (EntrepriseNotFound, RechercheEntreprisesError) as e:
         return _err(str(e), siren=siren)
     except Exception as e:  # noqa: BLE001
         log.exception("dirigeants")
@@ -209,41 +218,10 @@ async def dirigeants(siren: str, ctx: Context) -> dict:
 
 
 @mcp.tool()
-async def beneficiaires_effectifs(siren: str, ctx: Context) -> dict:
-    """Bénéficiaires effectifs (UBO) déclarés d'une société (source : RNE/INPI).
-
-    Renvoie l'identité des UBO et, si disponibles, leurs modalités de contrôle
-    (part de capital / droits de vote). Note : ces données sont parfois restreintes
-    par l'INPI (accès 403) ou non déclarées.
-
-    Args:
-        siren: Numéro SIREN (9 chiffres).
-    """
-    try:
-        siren = _valider_siren(siren)
-    except ValueError as e:
-        return _err(str(e))
-    try:
-        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
-        liste = parsers.parse_beneficiaires(data)
-        return {
-            "siren": siren,
-            "nombre": len(liste),
-            "beneficiaires_effectifs": liste,
-            "note": None if liste else "Aucun bénéficiaire effectif déclaré ou accessible.",
-        }
-    except (RNENotFound, RNEError) as e:
-        return _err(str(e), siren=siren)
-    except Exception as e:  # noqa: BLE001
-        log.exception("beneficiaires_effectifs")
-        return _err(f"Erreur inattendue : {e}", siren=siren)
-
-
-@mcp.tool()
 async def statut_entreprise(siren: str, ctx: Context) -> dict:
-    """Statut d'activité d'une société : actif, radié, en cessation/liquidation (RNE/INPI).
+    """Statut d'activité d'une société : active ou cessée (source : Recherche d'Entreprises).
 
-    Le statut est déduit des événements de l'historique RNE et des blocs de cessation.
+    Déduit de l'état administratif INSEE (A = active, C = cessée).
 
     Args:
         siren: Numéro SIREN (9 chiffres).
@@ -253,9 +231,11 @@ async def statut_entreprise(siren: str, ctx: Context) -> dict:
     except ValueError as e:
         return _err(str(e))
     try:
-        data = await _avec_keepalive(ctx, get_rne().get_company(siren), f"Interrogation RNE {siren}")
-        return parsers.parse_statut(data)
-    except (RNENotFound, RNEError) as e:
+        result = await _avec_keepalive(
+            ctx, get_entreprises().par_siren(siren), f"Recherche entreprise {siren}"
+        )
+        return entreprises_parsers.parse_statut(result)
+    except (EntrepriseNotFound, RechercheEntreprisesError) as e:
         return _err(str(e), siren=siren)
     except Exception as e:  # noqa: BLE001
         log.exception("statut_entreprise")

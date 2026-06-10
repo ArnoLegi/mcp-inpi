@@ -7,20 +7,16 @@ from dataclasses import dataclass
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()  # charge un éventuel .env local (no-op si absent / sur Replit Secrets)
+    load_dotenv()  # charge un éventuel .env local (no-op si absent)
 except ImportError:  # python-dotenv non installé : on lit l'environnement tel quel
     pass
-
-
-class ConfigError(RuntimeError):
-    """Configuration manquante ou invalide."""
 
 
 @dataclass(frozen=True)
 class Settings:
     inpi_username: str
     inpi_password: str
-    # Compte technique API PI Marques ; retombe sur le compte RNE si absent.
+    # Compte technique API PI Marques ; retombe sur le compte INPI principal si absent.
     pi_username: str
     pi_password: str
     host: str
@@ -34,7 +30,7 @@ class Settings:
 def _clean_secret(name: str) -> str:
     """Lit une variable d'environnement en retirant espaces et guillemets parasites.
 
-    Erreur fréquente sur Railway/Replit : coller la valeur entourée de guillemets
+    Erreur fréquente sur Railway : coller la valeur entourée de guillemets
     (INPI_PASSWORD="xxx"), qui sont alors stockés littéralement et provoquent un 401.
     """
     value = os.environ.get(name, "").strip()

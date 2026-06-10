@@ -67,8 +67,9 @@ app = build_app()
 if __name__ == "__main__":
     if not settings.has_inpi_credentials:
         log.warning(
-            "INPI_USERNAME / INPI_PASSWORD non définis : les outils RNE et Marques "
-            "échoueront. Renseignez-les dans .env (local) ou les variables Railway."
+            "INPI_USERNAME / INPI_PASSWORD non définis : les outils de marques "
+            "(portfolio_marques, detail_marque) échoueront. Les autres outils "
+            "(entreprises, BODACC) fonctionnent sans identifiants."
         )
     log.info(
         "Démarrage MCP INPI v%s sur http://%s:%s (transports : /mcp, /sse)",

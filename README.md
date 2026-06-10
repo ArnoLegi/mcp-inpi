@@ -1,7 +1,7 @@
-# MCP INPI — Outils juridiques entreprises (RNE · BODACC · Marques)
+# MCP Entreprises FR — Outils juridiques (Recherche d'Entreprises · BODACC · Marques INPI)
 
 Serveur **MCP** (Model Context Protocol) en Python exposant des outils juridiques sur les
-entreprises françaises, basés sur trois API **gratuites** de l'INPI / DILA. Deux transports :
+entreprises françaises, basés sur des API **gratuites**. Deux transports :
 **Streamable HTTP** (`/mcp`, recommandé pour Claude.ai) et **SSE** (`/sse`, legacy).
 Déployable directement sur **Railway** et connectable à **Claude.ai**.
 
@@ -9,30 +9,32 @@ Déployable directement sur **Railway** et connectable à **Claude.ai**.
 
 | Outil | Description | Source | Auth |
 |---|---|---|---|
-| `rechercher_societe(denomination)` | Recherche d'entreprises par nom → SIREN, forme juridique, commune | RNE | INPI |
-| `fiche_societe(siren)` | Identité : dénomination, forme juridique, siège, capital, objet social, SIREN | RNE | INPI |
-| `dirigeants(siren)` | Mandataires sociaux (qualité, identité, flag UBO) | RNE | INPI |
-| `beneficiaires_effectifs(siren)` | Bénéficiaires effectifs (UBO) et modalités de contrôle | RNE | INPI |
-| `statut_entreprise(siren)` | Actif / radié / en cessation / liquidation | RNE | INPI |
+| `rechercher_societe(denomination)` | Recherche d'entreprises par nom → SIREN, forme juridique, commune | Recherche d'Entreprises | aucune |
+| `fiche_societe(siren)` | Identité : dénomination, sigle, forme juridique, activité (NAF), siège, SIREN | Recherche d'Entreprises | aucune |
+| `dirigeants(siren)` | Mandataires sociaux (qualité, identité, date de naissance) | Recherche d'Entreprises | aucune |
+| `statut_entreprise(siren)` | Active / cessée (état administratif INSEE) | Recherche d'Entreprises | aucune |
 | `procedures_collectives(siren)` | Sauvegarde, redressement, liquidation judiciaire | BODACC | aucune |
-| `portfolio_marques(siren)` | Marques déposées par une société (par SIREN) | API PI | INPI* |
-| `detail_marque(identifiant)` | Détail d'une marque (classes Nice, dates, statut, logo) | API PI | INPI* |
+| `portfolio_marques(siren)` | Marques déposées par une société (par SIREN) | API PI INPI | INPI* |
+| `detail_marque(identifiant)` | Détail d'une marque (classes Nice, dates, statut, logo) | API PI INPI | INPI* |
 
-\* L'API PI Marques utilise un **compte technique distinct** (voir Configuration).
+\* Seuls les outils de marques nécessitent des identifiants INPI (voir Configuration).
+Les bénéficiaires effectifs (UBO) ne sont pas exposés : aucune source gratuite ne les fournit.
 
 ## Sources de données
 
-- **RNE** — `registre-national-entreprises.inpi.fr/api` — login `POST /api/sso/login`
-  → token Bearer ; `GET /api/companies/{siren}`. Quota : 10 000 req/jour.
-- **BODACC** — `bodacc-datadila.opendatasoft.com` (Opendatasoft v2.1), open data **sans auth**.
-- **API PI Marques** — `api-gateway.inpi.fr/services/apidiffusion` — auth XSRF + cookies.
+- **Recherche d'Entreprises** — `recherche-entreprises.api.gouv.fr` (data.gouv.fr / DINUM),
+  basée sur SIRENE + RNE. Open data **sans clé**, réponse < 1 s. Endpoint `GET /search?q=`.
+- **BODACC** — `bodacc-datadila.opendatasoft.com` (Opendatasoft v2.1), open data **sans clé**.
+- **API PI Marques** — `api-gateway.inpi.fr/services/apidiffusion` — auth XSRF + cookies (INPI).
 
 ## Configuration
 
-Copiez `.env.example` en `.env` (non commité) et renseignez :
+Les outils entreprises et BODACC fonctionnent **sans aucune clé**. Seuls les outils de
+marques nécessitent des identifiants INPI. Copiez `.env.example` en `.env` (non commité) :
 
 ```env
-INPI_USERNAME=votre_email@example.com      # compte data.inpi.fr (API RNE)
+# Requis UNIQUEMENT pour portfolio_marques / detail_marque (compte data.inpi.fr) :
+INPI_USERNAME=votre_email@example.com
 INPI_PASSWORD=votre_mot_de_passe
 
 # Optionnel — compte technique API PI Marques (api-gateway.inpi.fr).
@@ -41,10 +43,9 @@ INPI_PASSWORD=votre_mot_de_passe
 # INPI_PI_PASSWORD=mot_de_passe_technique
 ```
 
-> **Compte INPI** : créez-le sur https://data.inpi.fr/login, puis activez « Accès API RNE »
-> (et « Accès APIs PI » pour les marques) dans *Mes accès API / SFTP*. L'activation de
-> l'API PI génère un **compte technique** (email + mot de passe propres) à mettre dans
-> `INPI_PI_USERNAME/INPI_PI_PASSWORD`.
+> **Compte INPI (marques uniquement)** : créez-le sur https://data.inpi.fr/login, puis
+> activez « Accès APIs PI » dans *Mes accès API / SFTP*. L'activation génère un **compte
+> technique** (email + mot de passe propres) à mettre dans `INPI_PI_USERNAME/INPI_PI_PASSWORD`.
 
 ## Lancer en local
 
@@ -68,8 +69,8 @@ Python 3.11). Railway injecte automatiquement la variable `PORT`, déjà prise e
 **Depuis l'interface Railway :**
 
 1. *New Project → Deploy from GitHub repo* et sélectionnez ce dépôt.
-2. Dans **Variables**, ajoutez `INPI_USERNAME`, `INPI_PASSWORD`
-   (et éventuellement `INPI_PI_USERNAME`, `INPI_PI_PASSWORD`). **Ne commitez jamais `.env`.**
+2. (Optionnel, pour les marques) dans **Variables**, ajoutez `INPI_USERNAME`,
+   `INPI_PASSWORD`. **Ne commitez jamais `.env`.** Les autres outils marchent sans clé.
 3. Dans **Settings → Networking**, cliquez *Generate Domain* pour obtenir une URL publique.
 4. Le déploiement se lance automatiquement ; le healthcheck pointe sur `/health`.
 5. Vos endpoints publics : `https://<votre-projet>.up.railway.app/mcp` (recommandé)
@@ -81,9 +82,9 @@ Python 3.11). Railway injecte automatiquement la variable `PORT`, déjà prise e
 npm i -g @railway/cli
 railway login
 railway init
-railway variables --set INPI_USERNAME=... --set INPI_PASSWORD=...
 railway up
 railway domain        # génère l'URL publique
+# (optionnel, marques) : railway variables --set INPI_USERNAME=... --set INPI_PASSWORD=...
 ```
 
 ## Connexion à Claude.ai
@@ -100,19 +101,22 @@ https://<votre-projet>.up.railway.app/mcp
 > SSE legacy peut provoquer l'erreur « Session terminated » (code 32600) côté Claude.ai.
 
 > ⚠️ **Sécurité** : sans authentification, toute personne connaissant l'URL peut utiliser
-> le serveur (et donc consommer votre quota INPI). Gardez l'URL privée, ou réintroduisez
-> une protection (reverse-proxy, IP allowlist, ou une couche d'auth) si nécessaire.
+> le serveur. Gardez l'URL privée, ou réintroduisez une protection (reverse-proxy, IP
+> allowlist, ou une couche d'auth) si nécessaire.
 
 ## Notes & limites
 
-- **UBO** : données parfois confidentielles côté INPI (réponse `403`) ou non déclarées.
-- **Statut** : déduit des événements RNE et blocs de cessation (pas de champ unique « statut »).
+- **Identité** : l'API Recherche d'Entreprises ne fournit ni le **capital social** ni
+  l'**objet social** (données SIRENE/RNE ouvertes). Le reste (dénomination, forme juridique,
+  activité NAF, siège, dirigeants, statut) est complet et rapide (< 1 s).
+- **Bénéficiaires effectifs (UBO)** : non exposés (aucune source gratuite). Nécessiteraient
+  une API payante (ex. Pappers) ou l'API formalités RNE de l'INPI (habilitation requise).
+- **Statut** : `active` / `cessée` selon l'état administratif INSEE (`A` / `C`).
 - **Procédures collectives** : `en_cours_estimation` est une heuristique (une clôture récente
   éteint la procédure) — à confirmer auprès du greffe/tribunal compétent.
 - **Marques par SIREN** : ne couvre que les marques **FR** (le SIREN n'est rattaché qu'au
-  déposant / dernier titulaire ayant renouvelé). Le schéma JSON de la notice marque peut
-  varier : `detail_marque` renvoie la notice telle quelle (plus l'URL du logo).
-- **Forme juridique / rôles** : codes INSEE/INPI conservés bruts + libellé quand connu.
+  déposant / dernier titulaire ayant renouvelé). `detail_marque` renvoie la notice telle
+  quelle (plus l'URL du logo).
 
 ## Structure du projet
 
@@ -125,12 +129,13 @@ mcp-inpi/
 ├── .env.example            # modèle de configuration (secrets)
 ├── requirements.txt
 └── inpi_mcp/
-    ├── server.py           # FastMCP + définition des 8 outils
-    ├── config.py           # variables d'environnement
-    ├── reference.py        # tables (formes juridiques, rôles) + normalisation SIREN
-    ├── parsers.py          # extraction RNE / BODACC / marques
+    ├── server.py                # FastMCP + définition des 7 outils
+    ├── config.py                # variables d'environnement
+    ├── reference.py             # formes juridiques (codes INSEE) + normalisation SIREN
+    ├── entreprises_parsers.py   # extraction API Recherche d'Entreprises
+    ├── parsers.py               # extraction BODACC / marques
     └── clients/
-        ├── rne.py          # API RNE (token Bearer, refresh sur 401)
-        ├── bodacc.py       # API BODACC Opendatasoft (sans auth)
-        └── marques.py      # API PI Marques (XSRF + cookies)
+        ├── recherche_entreprises.py  # API data.gouv.fr (sans clé)
+        ├── bodacc.py                 # API BODACC Opendatasoft (sans clé)
+        └── marques.py                # API PI Marques INPI (XSRF + cookies)
 ```
