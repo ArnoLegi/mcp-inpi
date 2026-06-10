@@ -39,9 +39,6 @@ INPI_PASSWORD=votre_mot_de_passe
 # Si absent, INPI_USERNAME/INPI_PASSWORD sont réutilisés.
 # INPI_PI_USERNAME=compte_technique@example.com
 # INPI_PI_PASSWORD=mot_de_passe_technique
-
-# Clé Bearer protégeant l'endpoint MCP (voir « Authentification de l'endpoint MCP »).
-MCP_API_KEY=mcpinpi_remplacez_par_votre_cle
 ```
 
 > **Compte INPI** : créez-le sur https://data.inpi.fr/login, puis activez « Accès API RNE »
@@ -84,51 +81,27 @@ Python 3.11). Railway injecte automatiquement la variable `PORT`, déjà prise e
 npm i -g @railway/cli
 railway login
 railway init
-railway variables --set INPI_USERNAME=... --set INPI_PASSWORD=... --set MCP_API_KEY=...
+railway variables --set INPI_USERNAME=... --set INPI_PASSWORD=...
 railway up
 railway domain        # génère l'URL publique
 ```
 
-## Authentification de l'endpoint MCP
-
-Le serveur peut être protégé par une **clé Bearer** via la variable `MCP_API_KEY` :
-
-- Si `MCP_API_KEY` est définie, toute requête sur `/mcp`, `/sse` et `/messages/` doit
-  présenter le token, **au choix** :
-  - via l'en-tête `Authorization: Bearer <MCP_API_KEY>`, ou
-  - via le paramètre d'URL `?token=<MCP_API_KEY>` (ex. `.../mcp?token=...`, pratique pour
-    les clients ne gérant pas les en-têtes, comme OpenLégi).
-  Sinon → **401**.
-- `/health` reste accessible sans clé (healthcheck Railway).
-- Si `MCP_API_KEY` est absente, l'endpoint est **public** (déconseillé en production ;
-  un avertissement est journalisé au démarrage).
-
-Générez une clé :
-
-```bash
-python -c "import secrets; print('mcpinpi_' + secrets.token_urlsafe(32))"
-```
-
 ## Connexion à Claude.ai
 
-Dans Claude.ai → *Settings → Connectors → Add custom connector*, renseignez l'URL
-**Streamable HTTP** (recommandée) avec le token dans l'URL :
+Les endpoints MCP sont **publics** (pas d'authentification). Dans Claude.ai →
+*Settings → Connectors → Add custom connector*, renseignez l'URL **Streamable HTTP**
+(recommandée) :
 
 ```
-https://<votre-projet>.up.railway.app/mcp?token=<votre MCP_API_KEY>
+https://<votre-projet>.up.railway.app/mcp
 ```
 
-> ⚠️ **Important** : utilisez bien `/mcp` (Streamable HTTP), **pas** `/sse`, lorsque vous
-> passez le token via `?token=`. En SSE, Claude.ai ne conserve pas la query string de
-> l'URL `/messages/` annoncée par le serveur, ce qui provoque l'erreur
-> « Session terminated » (code 32600). Avec Streamable HTTP, toutes les requêtes vont sur
-> la même URL `/mcp`, donc le token est toujours transmis.
+> ⚠️ Utilisez bien `/mcp` (Streamable HTTP), **pas** `/sse`, avec Claude.ai. Le transport
+> SSE legacy peut provoquer l'erreur « Session terminated » (code 32600) côté Claude.ai.
 
-Alternative par en-tête (fonctionne aussi bien sur `/mcp` que `/sse`) :
-
-```
-Authorization: Bearer <votre MCP_API_KEY>
-```
+> ⚠️ **Sécurité** : sans authentification, toute personne connaissant l'URL peut utiliser
+> le serveur (et donc consommer votre quota INPI). Gardez l'URL privée, ou réintroduisez
+> une protection (reverse-proxy, IP allowlist, ou une couche d'auth) si nécessaire.
 
 ## Notes & limites
 

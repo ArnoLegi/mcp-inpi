@@ -23,18 +23,12 @@ class Settings:
     # Compte technique API PI Marques ; retombe sur le compte RNE si absent.
     pi_username: str
     pi_password: str
-    # Clé d'API protégeant l'endpoint MCP (Bearer). Vide = endpoint ouvert.
-    mcp_api_key: str
     host: str
     port: int
 
     @property
     def has_inpi_credentials(self) -> bool:
         return bool(self.inpi_username and self.inpi_password)
-
-    @property
-    def auth_enabled(self) -> bool:
-        return bool(self.mcp_api_key)
 
 
 def _clean_secret(name: str) -> str:
@@ -56,8 +50,6 @@ def load_settings() -> Settings:
     pi_username = _clean_secret("INPI_PI_USERNAME") or username
     pi_password = _clean_secret("INPI_PI_PASSWORD") or password
 
-    mcp_api_key = _clean_secret("MCP_API_KEY")
-
     host = os.environ.get("HOST", "0.0.0.0").strip() or "0.0.0.0"
     port = int(os.environ.get("PORT", "8080"))
 
@@ -66,7 +58,6 @@ def load_settings() -> Settings:
         inpi_password=password,
         pi_username=pi_username,
         pi_password=pi_password,
-        mcp_api_key=mcp_api_key,
         host=host,
         port=port,
     )
